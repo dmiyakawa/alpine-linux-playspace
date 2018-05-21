@@ -1,0 +1,356 @@
+# -*- mode: sh; sh-indentation: 2 -*-
+#
+# Minimal zshrc configuration by dmiyakawa.
+# Just scp this file to (remote):.zshrc
+#
+# - "sagent" support
+# - "spectrum_ls" support
+# - basic pyenv support with $HOME/.pyenv (Do not use brew on Mac)
+# - basic rbenv support with $HOME/.rbenv
+# - NO extension support for simplicity.
+# -- .zshrc.d/ and .zfunc/ will not be loaded
+#
+# License Information:
+#
+# Copyright [2016-2018] Daisuke Miyakawa
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# 
+#     http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Main version (stored in central repo) of zshrc.minimal.
+export ZSHRC_MINIMAL_VERSION="2.3.2"
+
+# Local, supplemental version info for this file.
+#
+# If modify this file, fix this version instead of MIN_ZSHRC_VERSION.
+# It is recommended to also record version history here.
+#
+# e.g. 1.0.1-vada ... Add plenv configuration at the bottom
+#
+# 1.0.0 ... Base vesion
+# 1.0.1 ... Remove dircolor dependency
+#
+export ZSHRC_LOCAL_VERSION="1.0.1-playspace"
+
+#
+# Keep original $PATH in $ORG_PATH so that we can easily reset it later.
+# Prevent forgetting it after multiple "source ~/.zshrc" with "-z" option.
+#
+if [[ -z $ORG_PATH ]]; then
+  export ORG_PATH=$PATH
+fi
+if [[ -z $ORG_FPATH ]]; then
+  export ORG_FPATH=$FPATH
+fi
+
+# Variables that can be used by external "preload" scripts
+export HOST=`hostname`
+
+
+export EDITOR=vi
+
+# History Settings
+export HISTFILE=$HOME/.zhistory
+export HISTSIZE=100000
+export SAVEHIST=100000
+
+## Locale/Language Settings
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+export LANGUAGE=en
+
+autoload -Uz promptinit && promptinit
+autoload -Uz colors && colors
+autoload -Uz zed
+# Enable "compsys" auto-completion system.
+# http://zshwiki.org/home/examples/compsys/general
+autoload -Uz compinit && compinit
+
+# Make Ctrl-S work as search-foward appropriately
+# http://superuser.com/questions/385175/how-to-reclaim-s-in-zsh
+stty stop undef
+stty start undef
+# Do not let Ctrl-S freeze the terminal.
+# http://unix.stackexchange.com/questions/12107
+# how-to-unfreeze-after-accidentally-pressing-ctrl-s-in-a-terminal
+stty -ixon
+
+# Use emacs keybindings while our EDITOR is set to "vi".
+bindkey -e
+bindkey '^R' history-incremental-pattern-search-backward
+bindkey '^S' history-incremental-pattern-search-forward
+
+### Basic setopt section ###
+setopt histignorealldups sharehistory
+
+# follows symlinks
+setopt chase_links
+
+setopt nobeep extendedglob listtypes histignorealldups
+setopt NO_correct magicequalsubst
+setopt autopushd pushdminus pushdsilent pushdtohome nohup
+setopt print_eight_bit brace_ccl
+setopt list_packed notify pushd_ignore_dups rc_expand_param
+setopt transient_rprompt
+setopt nopromptcr
+
+# ignore no match (compatible with bash)
+setopt nonomatch
+
+## History Settings ##
+# HISTSIZE and SAVEHIST is stored in .zshenv
+#
+# Changes the behavior of "foo='*'; print $foo" (default unset)
+# setopt glob_subst
+#
+# setopt share_history
+setopt inc_append_history extended_history hist_ignore_dups
+setopt hist_expire_dups_first hist_ignore_space hist_reduce_blanks
+
+# change directory without cd command
+setopt auto_cd
+
+zstyle ':completion:*' auto-description 'specify: %d'
+zstyle ':completion:*' completer _expand _complete _correct _approximate
+zstyle ':completion:*' format 'Completing %d'
+zstyle ':completion:*' group-name ''
+zstyle ':completion:*' menu select=2
+zstyle ':completion:*:default' list-colors ${(s.:.)LS_COLORS}
+zstyle ':completion:*' list-colors ''
+zstyle ':completion:*' list-prompt %SAt %p: Hit TAB for more, or the character to insert%s
+zstyle ':completion:*' matcher-list '' 'm:{a-z}={A-Z}' 'm:{a-zA-Z}={A-Za-z}' 'r:|[._-]=* r:|=* l:|=*'
+zstyle ':completion:*' menu select=long
+zstyle ':completion:*' select-prompt %SScrolling active: current selection at %p%s
+zstyle ':completion:*' use-compctl false
+zstyle ':completion:*' verbose true
+zstyle ':completion:*:*:kill:*:processes' list-colors '=(#b) #([0-9]#)*=0=01;31'
+zstyle ':completion:*:kill:*' command 'ps -u $USER -o pid,%cpu,tty,cputime,cmd'
+
+#### Begin: Aliases ####
+
+alias ltree="pwd;find . |sort|sed '1d;s,[^/]*/,|    ,g;s/..//;s/[^ ]*$/|-- &/'"
+alias gl='glances'
+alias ipy='ipython'
+alias ipy3='ipython3'
+alias EN="LANG=en_US.UTF-8"
+alias JA="LANG=ja_JP.UTF-8"
+alias -g L="| lv"
+alias -g H="| head"
+# just append \n at the end (may be effective with curl)
+alias -g NN="; echo"
+alias -g JR="| json_reformat"
+
+#### End: Aliases ####
+
+
+#### Begin: sshagent settings ####
+
+# "Sharing the same `ssh-agent` among multiple login sessions"
+# http://superuser.com/questions/141044/
+function sshagent_findsockets {
+  find /tmp -uid $(id -u) -type s -name agent.\* 2>/dev/null
+}
+
+function sshagent_testsocket {
+  if [ ! -x "$(which ssh-add)" ] ; then
+    echo "ssh-add is not available; agent testing aborted"
+    return 1
+  fi
+
+  if [ X"$1" != X ] ; then
+    export SSH_AUTH_SOCK=$1
+  fi
+
+  if [ X"$SSH_AUTH_SOCK" = X ] ; then
+    return 2
+  fi
+
+  if [ -S $SSH_AUTH_SOCK ] ; then
+    ssh-add -l > /dev/null
+    if [ $? = 2 ] ; then
+      echo "Socket $SSH_AUTH_SOCK is dead!  Deleting!"
+      rm -f $SSH_AUTH_SOCK
+      return 4
+    else
+      echo "Found ssh-agent $SSH_AUTH_SOCK"
+      return 0
+    fi
+  else
+    echo "$SSH_AUTH_SOCK is not a socket!"
+    return 3
+  fi
+}
+
+function sshagent_init {
+  # ssh agent sockets can be attached to a ssh daemon process or an
+  # ssh-agent process.
+  AGENTFOUND=0
+
+  # Attempt to find and use the ssh-agent in the current environment
+  if sshagent_testsocket ; then AGENTFOUND=1 ; fi
+
+  # If there is no agent in the environment, search /tmp for
+  # possible agents to reuse before starting a fresh ssh-agent
+  # process.
+  if [ $AGENTFOUND = 0 ] ; then
+    for agentsocket in $(sshagent_findsockets) ; do
+      if [ $AGENTFOUND != 0 ] ; then break ; fi
+      if sshagent_testsocket $agentsocket ; then AGENTFOUND=1 ; fi
+    done
+  fi
+
+  # If at this point we still haven't located an agent, it's time to
+  # start a new one
+  if [ $AGENTFOUND = 0 ] ; then
+    eval `ssh-agent -t 5h`
+  fi
+
+  # Clean up
+  unset AGENTFOUND
+  unset agentsocket
+
+  # Finally, show what keys are currently in the agent
+  ssh-add -l
+}
+
+alias sagent="sshagent_init"
+
+#### End: sshagent settings ####
+
+
+#### spectrum_ls settings ####
+
+# Set FX, FG and BG as associative arrays (-A ... associative array)
+typeset -A FX FG BG
+
+FX=(
+    reset     "%{[00m%}"
+    bold      "%{[01m%}" no-bold      "%{[22m%}"
+    italic    "%{[03m%}" no-italic    "%{[23m%}"
+    underline "%{[04m%}" no-underline "%{[24m%}"
+    blink     "%{[05m%}" no-blink     "%{[25m%}"
+    reverse   "%{[07m%}" no-reverse   "%{[27m%}"
+)
+
+for color in {000..255}; do
+    FG[$color]="%{[38;5;${color}m%}"
+    BG[$color]="%{[48;5;${color}m%}"
+done
+
+# Latin :-)
+# http://www.f.waseda.jp/tokuyam/aen1.htm
+ZSH_SPECTRUM_TEXT=${ZSH_SPECTRUM_TEXT:-Arma virumque cano Troiae qui primus ab oris}
+
+# Show all 256 colors with color number
+function spectrum_ls() {
+  for code in {000..255}; do
+    print -P -- "$code: %F{$code}$ZSH_SPECTRUM_TEXT%f"
+  done
+}
+
+# Show all 256 colors where the background is set to specific color
+function spectrum_bls() {
+  for code in {000..255}; do
+    print -P -- "$BG[$code]$code: $ZSH_SPECTRUM_TEXT %{$reset_color%}"
+  done
+}
+
+# Pickup several colors randomly.
+function spectrum_lottery() {
+  for i in $(seq 10); do
+    code=$(($RANDOM % 255))
+    formatted=$(printf "%03d" ${code})
+    print -P -- "$formatted: %F{$code}$ZSH_SPECTRUM_TEXT%f"
+  done
+}
+
+SPECTRUM_READY="yes"
+
+#### End of spectrum_ls settings ####
+
+
+## Default Color Settings ##
+# This assumes "colors" has been auto-loaded
+#
+# 000 ... black   (Not used; this color is hard to see)
+# 001 ... red     (Need to be warned)
+# 002 ... green   (Work environment)
+# 003 ... yellow  (Local environment)
+# 004 ... blue    (Not used; this color is hard to see)
+# 005 ... magenta (Somewhere "noble")
+# 006 ... cyan    (Somewhere "away")
+# 007 ... white   (Need "extreme" caution, or no setting)
+#
+# - %F (%f) Start (stop) using a different foreground color.
+# - %K (%k) Start (stop) using a different bacKground color.
+# - %(x.true-text.false-text) ... Specifies a ternary expression.
+#
+# See also
+# - zshmisc(1)
+# - http://zsh.sourceforge.net/Doc/Release/Prompt-Expansion.html
+#
+FG_COLOR='cyan'
+if [ "$TERM" = "xterm-256color" -a -n "$FG" ]; then
+  # Note: byobu (tmux/screen) usually does not honor this configuration.
+  FG_COLOR='201'  # Vivid Cyan
+fi
+  
+PROMPT="%F{$FG_COLOR}%T@%M %3~%(!.#.$)%f%k "
+RPROMPT=""
+
+# demo-prompt
+PROMPT_FOR_DEMO="%F{003}%(!.#.$)%f%k "
+
+function start_demo() {
+  if [ -z "$ORG_PROMPT" ]; then
+    ORG_PROMPT=$PROMPT
+    PROMPT=$PROMPT_FOR_DEMO
+  else
+    echo "ORG_PROMPT already set" 1>&2
+  fi
+}
+alias demo_prompt=start_demo
+
+function end_demo() {
+  if [ -n "$ORG_PROMPT" ]; then
+    PROMPT=$ORG_PROMPT
+    ORG_PROMPT=""
+  else
+    echo "ORG_PROMPT not set yet" 1>&2
+  fi
+}
+alias reset_prompt=end_demo
+
+
+#### Begin: pyenv, rbenv ####
+# pyenv configuration
+# Note:
+# - install it via git directoly (do not use brew on macOS, etc.)
+if [[ -d "$HOME/.pyenv" ]]; then
+  export PYENV_ROOT="$HOME/.pyenv"
+  export PATH="$PYENV_ROOT/bin:$PATH"
+  eval "$(pyenv init -)"
+fi
+
+# rbenv consideration
+if [[ -d "$HOME/.rbenv" ]]; then
+  export PATH="$HOME/.rbenv/bin:$PATH"
+  eval "$(rbenv init -)"
+fi
+#### End: pyenv, rbenv ####
+
+#
+# If you modify this file, consider changing ZSHRC_LOCAL_VERSION.
+#
+
+# vim:set ts=2 sw=2 et:
